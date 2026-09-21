@@ -1,0 +1,38 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Saved model artifacts (regenerate by re-running the notebook)
+*.pt
+*.pth
+*.pkl
+*.joblib
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Secrets / local env
+.env
+.env.*
+
+# Tutorials and scratch, not part of any project
+Pytorch-Tutorial/
+main.py
+
+# Fashion-MNIST CSVs are too large to commit (train file alone is 133MB,
+# over GitHub's 100MB per-file limit) -- see Projects/Fashion-MNIST/README.md
+# for the download link.
+Data/Fashion-MNIST/
