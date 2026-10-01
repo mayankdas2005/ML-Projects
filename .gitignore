@@ -23,6 +23,7 @@ wheels/
 Thumbs.db
 .vscode/
 .idea/
+.claude/
 
 # Secrets / local env
 .env
