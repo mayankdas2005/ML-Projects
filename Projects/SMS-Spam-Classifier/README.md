@@ -1,19 +1,21 @@
 # SMS Spam / Smishing Classifier
 
-Three models compared on the **same** train/val/test split: a TF-IDF + LogisticRegression
+Four models compared on the **same** train/val/test split: a TF-IDF + LogisticRegression
 baseline (`SMS_Spam_Classifier_Baseline.ipynb`), a from-scratch PyTorch mean-pooling
-embedding model (`SMS_Spam_Classifier_NN.ipynb`), and a 1D CNN with a cosine LR schedule
-(`SMS_Spam_Classifier_CNN.ipynb`). Three-way classification: `ham` / `spam` / `smishing`.
+embedding model (`SMS_Spam_Classifier_NN.ipynb`), a 1D CNN with a cosine LR schedule
+(`SMS_Spam_Classifier_CNN.ipynb`), and frozen `all-MiniLM-L6-v2` sentence embeddings fed
+into LogisticRegression (`SMS_Spam_Classifier_FrozenEmbeddings.ipynb`). Three-way
+classification: `ham` / `spam` / `smishing`.
 
 Dataset: Mishra & Soni SMS Phishing dataset (Mendeley),
 `Data/SMS-Spam-Data/Dataset_5971.csv`, 5971 raw rows -> 5831 after de-duplication.
 
-**Split (identical across all three notebooks):** 80/20 stratified into train_temp/test,
+**Split (identical across all four notebooks):** 80/20 stratified into train_temp/test,
 then train_temp split 90/10 (stratified) into train/val. So train ~72% (4197 rows),
 val ~8% (467 rows), test = 20% (1167 rows), `random_state=42` throughout. The test set is
 touched exactly once per model, at the end.
 
-## Data fixes applied (all three notebooks)
+## Data fixes applied (all four notebooks)
 
 **1. Stripped a leading `\t` artifact.** 153 rows (2.6%) carried a literal leading tab
 character. All 153 were `spam`/`smishing` - **zero** were `ham`. This is a leakage-shaped
@@ -28,6 +30,7 @@ silently leak into anything whitespace-sensitive later.
 220 rows got a `<URL>` substitution, 625 got `<PHONE>`. Deliberately not matched: 4-6
 digit SMS short-codes (e.g. "text CHAT to 86688") - in this corpus they look identical to
 prices/quantities, and masking them indiscriminately looked more likely to hurt than help.
+The frozen-embeddings notebook skips this masking deliberately - see its own section below.
 
 ## Methodology note: the baseline split changed
 
@@ -52,8 +55,32 @@ intrinsically more "correct" than 0.896 would have been on a true re-split.
 | Model | Accuracy | Macro-F1 | Recall (ham) | Recall (smishing) | Recall (spam) | Ham msgs flagged as spam/smishing |
 |---|---:|---:|---:|---:|---:|---:|
 | **TF-IDF + LogisticRegression (balanced)** | **0.972** | **0.907** | 0.994 | 0.899 | 0.824 | 6 |
-| Embedding + mean pooling (PyTorch NN) | 0.955 | 0.866 | 0.984 | 0.862 | 0.758 | 15 |
 | 1D CNN + cosine LR schedule | 0.964 | 0.884 | 0.995 | 0.835 | 0.791 | 5 |
+| Embedding + mean pooling (PyTorch NN) | 0.955 | 0.866 | 0.984 | 0.862 | 0.758 | 15 |
+| Frozen MiniLM embeddings + LogisticRegression | 0.948 | 0.860 | 0.967 | 0.927 | 0.769 | 32 |
+
+## Frozen embeddings (diagnostic, no fine-tuning)
+
+`all-MiniLM-L6-v2` as a feature extractor only - no fine-tuning, no gradient ever touches
+its weights - pooled sentence embeddings fed into `LogisticRegression(class_weight=
+"balanced")`. Uses **raw text, not the `<PHONE>`/`<URL>` masked version**: a pretrained
+encoder has already seen phone numbers and URLs during its own pretraining and tokenizes
+them fine on its own, so masking would only throw away information for no benefit here.
+Purpose: isolate how much of any future transformer gain is pretrained knowledge alone
+vs. something fine-tuning adds - this result says "not much, on its own."
+
+It lands *below* the sparse TF-IDF baseline (0.860 vs. 0.907 macro-F1) and by far the
+worst on ham false positives (32, more than double the next-worst model). It does have
+the best smishing recall of any model so far (0.927), but at the cost of flagging a lot
+of ordinary messages as smishing to get there. Takeaway: general-purpose sentence
+embeddings, used as-is, don't carry this dataset's specific spam signals (exact phone
+numbers, specific scam phrasing) as well as sparse exact-token features do at this data
+size. If a transformer is going to beat the baseline, it'll need to come from
+fine-tuning, not from pretrained knowledge alone.
+
+Reproducibility note: first run downloads `all-MiniLM-L6-v2` from the Hugging Face Hub
+(~90MB), so it needs internet access once; after that it's cached locally and the
+notebook runs offline.
 
 ## Findings
 
@@ -82,10 +109,13 @@ intrinsically more "correct" than 0.896 would have been on a true re-split.
    branch, but the attribute is named `self.min_len`. It's never hit on this dataset
    (no batch's longest sequence is shorter than the largest kernel, 4), so training ran
    fine, but it would raise `AttributeError` on different data.
+6. **Frozen pretrained embeddings alone don't beat the sparse baseline** - see the
+   dedicated section above. The baseline's lead over every from-scratch or
+   frozen-feature approach tried so far keeps growing, not shrinking.
 
 ## Next steps
 
-- **Latency benchmark (ms/message, CPU)** for all three models - not measured yet for any
+- **Latency benchmark (ms/message, CPU)** for all four models - not measured yet for any
   of them, and it's the comparison that matters most given the target role's emphasis on
   CPU-scale, low-latency inference. Worth calling out: the baseline isn't just the most
   accurate model above, it's also almost certainly the cheapest to run per message - that
@@ -93,12 +123,6 @@ intrinsically more "correct" than 0.896 would have been on a true re-split.
 - **Multi-seed runs for the CNN** before drawing any conclusion about its variance - less
   urgent now that it's clearly behind the baseline rather than close to it, but still
   useful to know how noisy 0.884 actually is.
-- **Frozen embeddings + LogisticRegression** (cheap, diagnostic, do first): MiniLM
-  `all-MiniLM-L6-v2` or DistilBERT `distilbert-base-uncased` as a feature extractor only
-  (no fine-tuning), pooled embeddings into sklearn `LogisticRegression`. Use raw text,
-  not the `<PHONE>`/`<URL>` masked version - pretrained tokenizers handle real numbers/
-  URLs fine, masking may not help here. Purpose: isolate how much of any later gain is
-  pretrained knowledge vs. fine-tuning.
 - **Full fine-tuning**: DistilBERT and MiniLM via `AutoModelForSequenceClassification`,
   the model's own `AutoTokenizer` (not the custom whitespace vocab), lr 2e-5 to 5e-5,
   AdamW, 3-4 epochs, short warmup + decay. Run >= 3 seeds given the small training set.
