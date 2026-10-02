@@ -1,22 +1,23 @@
 # SMS Spam / Smishing Classifier
 
-Five models compared on the **same** train/val/test split: a TF-IDF + LogisticRegression
+Six models compared on the **same** train/val/test split: a TF-IDF + LogisticRegression
 baseline (`SMS_Spam_Classifier_Baseline.ipynb`), a from-scratch PyTorch mean-pooling
 embedding model (`SMS_Spam_Classifier_NN.ipynb`), a 1D CNN with a cosine LR schedule
 (`SMS_Spam_Classifier_CNN.ipynb`), frozen `all-MiniLM-L6-v2` sentence embeddings fed into
-LogisticRegression (`SMS_Spam_Classifier_FrozenEmbeddings.ipynb`), and a full fine-tune of
-that same MiniLM (`SMS_Spam_Classifier_MiniLMFineTuned.ipynb`). Three-way classification:
-`ham` / `spam` / `smishing`.
+LogisticRegression (`SMS_Spam_Classifier_FrozenEmbeddings.ipynb`), and full fine-tunes of
+MiniLM (`SMS_Spam_Classifier_MiniLMFineTuned.ipynb`) and DistilBERT
+(`SMS_Spam_Classifier_DistilBERTFineTuned.ipynb`). Three-way classification: `ham` /
+`spam` / `smishing`.
 
 Dataset: Mishra & Soni SMS Phishing dataset (Mendeley),
 `Data/SMS-Spam-Data/Dataset_5971.csv`, 5971 raw rows -> 5831 after de-duplication.
 
-**Split (identical across all five notebooks):** 80/20 stratified into train_temp/test,
+**Split (identical across all six notebooks):** 80/20 stratified into train_temp/test,
 then train_temp split 90/10 (stratified) into train/val. So train ~72% (4197 rows),
 val ~8% (467 rows), test = 20% (1167 rows), `random_state=42` throughout. The test set is
 touched exactly once per model, at the end.
 
-## Data fixes applied (all five notebooks)
+## Data fixes applied (all six notebooks)
 
 **1. Stripped a leading `\t` artifact.** 153 rows (2.6%) carried a literal leading tab
 character. All 153 were `spam`/`smishing` - **zero** were `ham`. This is a leakage-shaped
@@ -31,8 +32,8 @@ silently leak into anything whitespace-sensitive later.
 220 rows got a `<URL>` substitution, 625 got `<PHONE>`. Deliberately not matched: 4-6
 digit SMS short-codes (e.g. "text CHAT to 86688") - in this corpus they look identical to
 prices/quantities, and masking them indiscriminately looked more likely to hurt than help.
-The frozen-embeddings and fine-tuned-MiniLM notebooks skip this masking deliberately -
-see their own sections below.
+The frozen-embeddings and fine-tuned-transformer notebooks (MiniLM and DistilBERT) skip
+this masking deliberately - see their own sections below.
 
 ## Methodology note: the baseline split changed
 
@@ -56,9 +57,11 @@ intrinsically more "correct" than 0.896 would have been on a true re-split.
 
 | Model | Accuracy | Macro-F1 | Recall (ham) | Recall (smishing) | Recall (spam) | Ham msgs flagged as spam/smishing |
 |---|---:|---:|---:|---:|---:|---:|
-| **Fine-tuned MiniLM (best of 5 seeds)** | **0.974** | **0.920** | 0.989 | 0.945 | 0.857 | 11 |
+| **Fine-tuned DistilBERT (best of 5 seeds)** | **0.979** | **0.925** | 0.996 | 0.927 | 0.857 | **4** |
+| Fine-tuned DistilBERT (mean of 5 seeds) | - | 0.914 ± 0.008 | - | - | - | - |
+| Fine-tuned MiniLM (best of 5 seeds) | 0.974 | 0.920 | 0.989 | 0.945 | 0.857 | 11 |
 | Fine-tuned MiniLM (mean of 5 seeds) | - | 0.914 ± 0.005 | - | - | - | - |
-| TF-IDF + LogisticRegression (balanced) | 0.972 | 0.907 | 0.994 | 0.899 | 0.824 | **6** |
+| TF-IDF + LogisticRegression (balanced) | 0.972 | 0.907 | 0.994 | 0.899 | 0.824 | 6 |
 | 1D CNN + cosine LR schedule | 0.964 | 0.884 | 0.995 | 0.835 | 0.791 | 5 |
 | Embedding + mean pooling (PyTorch NN) | 0.955 | 0.866 | 0.984 | 0.862 | 0.758 | 15 |
 | Frozen MiniLM embeddings + LogisticRegression | 0.948 | 0.860 | 0.967 | 0.927 | 0.769 | 32 |
@@ -133,47 +136,87 @@ The fine-tuned checkpoint (~90MB) isn't committed to this repo - it's a one-minu
 run away, not worth versioning. The notebook's save/zip/download cells are commented out
 for that reason; uncomment them if you want the actual weights.
 
+## Fine-tuned DistilBERT
+
+Same recipe again, `distilbert-base-uncased` instead of MiniLM - 66M params, 768 hidden
+dim, vs. MiniLM's 22M params, 384 hidden dim. Raw text, same split, full fine-tune,
+`AdamW` lr `2e-5`, linear warmup + decay, 6 epochs, 5 seeds, checkpointed on best
+validation macro-F1. Also run on Colab, also checked in unexecuted
+(`SMS_Spam_Classifier_DistilBERTFineTuned.ipynb`) for the same reason.
+
+Test macro-F1 per seed: 0.9167, 0.9130, 0.9255, 0.9157, 0.9014 - **mean 0.914, std 0.008**.
+All 5 seeds beat the TF-IDF baseline again. But compare that mean to MiniLM's **0.914 ±
+0.005** - these two numbers are the same within either model's own seed-to-seed noise.
+**A model 3x the size bought no reliable quality improvement here.** The best individual
+seed (0.925, 4 ham false positives) is the best single result in the whole project - but
+"best of 5 seeds" is the same kind of number 0.896 and 0.920 were: a ceiling, not an
+expectation. The honest comparison between MiniLM and DistilBERT is mean vs. mean, and
+by that measure they're tied.
+
+```
+              precision    recall  f1-score   support
+
+         ham      0.997     0.996     0.996       967
+    smishing      0.910     0.927     0.918       109
+        spam      0.867     0.857     0.862        91
+
+    accuracy                          0.979      1167
+   macro avg      0.924     0.927     0.925      1167
+
+[[963   0   4]
+ [  0 101   8]
+ [  3  10  78]]
+```
+
+Given the tie on quality, the deciding factor between MiniLM and DistilBERT for this
+project is whichever is cheaper to run - exactly what the latency benchmark below is for.
+Absent that number, MiniLM is the more defensible default: same expected accuracy, a
+third of the parameters.
+
 ## Findings
 
 1. **Fine-tuning is what finally beats the TF-IDF baseline - nothing else did.** Every
    from-scratch model (NN, CNN) and the frozen-embedding diagnostic all lost to TF-IDF+LR
-   (0.907) once compared on the same split; only a full fine-tune of MiniLM (0.914 ± 0.005
-   across 5 seeds) got past it, and did so consistently, not as a fluke of one seed. The
-   corrected TF-IDF baseline still has the fewest ham false positives of any model (6),
-   so it isn't a clean sweep - but on macro-F1, spam recall, and smishing recall,
-   fine-tuned MiniLM is now the model to beat.
-2. `class_weight="balanced"` was, historically, the single biggest lever for the sklearn
+   (0.907) once compared on the same split; full fine-tunes of MiniLM (0.914 ± 0.005) and
+   DistilBERT (0.914 ± 0.008) both got past it, consistently across every seed, not as a
+   fluke of one run.
+2. **Fine-tuned MiniLM and DistilBERT are statistically tied - a 3x bigger model bought
+   nothing reliable here.** Their means (0.914 ± 0.005 vs. 0.914 ± 0.008) overlap well
+   within either model's own seed noise. The best individual checkpoint of either model
+   (DistilBERT's best seed: 0.925, 4 ham false positives) looks better than the other, but
+   "best of 5 seeds" is a ceiling, not an expectation - see the dedicated sections above
+   for why that distinction matters. Pending the latency benchmark below, MiniLM is the
+   more defensible choice: same expected quality, a third of the parameters.
+3. `class_weight="balanced"` was, historically, the single biggest lever for the sklearn
    baseline (see the markdown note inside `SMS_Spam_Classifier_Baseline.ipynb` for the
    old ablation numbers) - without it, spam recall on this data drops below 0.5.
-3. **Spam/smishing confusion is still the dominant error for every model**, and part of
+4. **Spam/smishing confusion is still the dominant error for every model**, and part of
    it is genuine label noise rather than a model failing to learn: the test set contains
    a "Bloomberg -Message center... Why wait?" message that appears twice with two
    different labels (once `smishing`, once `spam`) - both copies are in the baseline's
    current error list, which is as much a dataset problem as a model one.
-4. A known blind spot carried over from earlier analysis: real-world Indian promotional
+5. A known blind spot carried over from earlier analysis: real-world Indian promotional
    text (real estate, health checkups, finance) shares none of the lexical cues this
    dataset's UK-style spam uses, and has been missed by every model tried so far.
-5. Found a latent bug (not yet triggered, not yet fixed): `CNNModel.forward` in
+6. Found a latent bug (not yet triggered, not yet fixed): `CNNModel.forward` in
    `SMS_Spam_Classifier_CNN.ipynb` references `self.min` in its short-sequence padding
    branch, but the attribute is named `self.min_len`. It's never hit on this dataset
    (no batch's longest sequence is shorter than the largest kernel, 4), so training ran
    fine, but it would raise `AttributeError` on different data.
-6. **Frozen pretrained embeddings alone don't beat the sparse baseline, but fine-tuning
+7. **Frozen pretrained embeddings alone don't beat the sparse baseline, but fine-tuning
    the same model does** - frozen MiniLM scored 0.860, fine-tuned MiniLM scored 0.914 ±
    0.005. That ~5.4pp jump, on the identical base model, is the cleanest evidence yet that
    the gain was sitting in task adaptation, not in pretrained knowledge alone.
 
 ## Next steps
 
-- **Latency benchmark (ms/message)** for all five models - not measured yet for any of
-  them, and it's the comparison that matters most given the target role's emphasis on
-  CPU-scale, low-latency inference. This matters more now, not less: fine-tuned MiniLM
-  wins on quality but is a much bigger model than TF-IDF+LR, likely wants GPU to be fast,
-  and the sklearn baseline is almost certainly far cheaper per message. "How much
-  accuracy per millisecond" is the real comparison, not measured yet.
-- **Fine-tune DistilBERT** as a second data point, same recipe (raw text, same split,
-  full fine-tune, >= 5 seeds given how much seed variance mattered for MiniLM).
+- **Latency benchmark (ms/message)** for all six models - not measured yet for any of
+  them, and now the single most important number left to collect. MiniLM and DistilBERT
+  are tied on quality, both beat TF-IDF+LR on quality, but TF-IDF+LR is almost certainly
+  far cheaper per message, and MiniLM is almost certainly cheaper than DistilBERT. "How
+  much accuracy per millisecond" is the real comparison, and nothing else left in this
+  project can substitute for actually measuring it.
 - **Multi-seed runs for the CNN** before drawing any conclusion about its variance - less
-  urgent now that it's clearly behind both the baseline and fine-tuned MiniLM, but still
-  useful to know how noisy 0.884 actually is.
+  urgent now that it's clearly behind the baseline and both fine-tuned transformers, but
+  still useful to know how noisy 0.884 actually is.
 - Fix the `self.min` typo in `CNNModel.forward` before it's relied on with different data.
