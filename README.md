@@ -34,7 +34,7 @@ uv run --with jupyter jupyter nbconvert --to notebook --execute --inplace "Proje
 
 | Project | Notebook | Notes |
 |---|---|---|
-| [SMS Spam / Smishing Classifier](Projects/SMS-Spam-Classifier/SMS_Spam_Classifier_README.md) | `SMS_Spam_Classifier.ipynb` (TF-IDF + LogisticRegression), `SMS_Spam_Classifier_Pytorch.ipynb` (embedding + linear head) | Data included in this repo, no setup needed. |
+| [SMS Spam / Smishing Classifier](Projects/SMS-Spam-Classifier/README.md) | `SMS_Spam_Classifier_Baseline.ipynb` (TF-IDF + LogisticRegression), `SMS_Spam_Classifier_NN.ipynb` (mean-pooled embedding), `SMS_Spam_Classifier_CNN.ipynb`, `SMS_Spam_Classifier_FrozenEmbeddings.ipynb` (frozen MiniLM + LogisticRegression) | Data included in this repo. The frozen-embeddings notebook needs internet once to download its pretrained model. |
 | [Fashion-MNIST](Projects/Fashion-MNIST/README.md) | `Fashion-MNIST.ipynb` | Requires a manual data download first — see that project's README. |
 
 ## Data
