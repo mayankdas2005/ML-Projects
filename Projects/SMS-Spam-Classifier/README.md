@@ -53,6 +53,25 @@ too much into the exact direction of that one delta - the point of the fix is th
 is now a number earned on the same footing as the NN and CNN numbers, not that 0.907 is
 intrinsically more "correct" than 0.896 would have been on a true re-split.
 
+## Methodology note: CNN and NN re-measured across seeds
+
+Both `SMS_Spam_Classifier_NN.ipynb` and `SMS_Spam_Classifier_CNN.ipynb` originally ran
+once, seed 42. Once the fine-tuned transformers showed how much a single seed's number
+can mislead on this small a dataset, the same multi-seed treatment (5 seeds, 0-4) was
+applied here too.
+
+NN's original number (0.866) held up fine - it lands near the top of the new 5-seed
+range (0.846-0.869, mean **0.856 ± 0.008**), favorable but not a fluke.
+
+**CNN's original number (0.884) did not hold up.** It's higher than the *maximum* of all
+5 new seeds (0.848-0.861, mean **0.854 ± 0.004**), not just outside one standard
+deviation - a genuine outlier, not noise. The practical effect: CNN is no longer the
+closest from-scratch challenger to the TF-IDF baseline. Once measured fairly, **CNN and
+NN are statistically tied with each other** (0.854 vs. 0.856, within each other's seed
+noise), and both are clearly behind TF-IDF (0.907) and both fine-tuned transformers
+(~0.914). The gap between from-scratch models and TF-IDF is larger than this project
+previously reported, not smaller.
+
 ## Results (identical split, test set n=1167)
 
 | Model | Accuracy | Macro-F1 | Recall (ham) | Recall (smishing) | Recall (spam) | Ham msgs flagged as spam/smishing |
@@ -62,8 +81,10 @@ intrinsically more "correct" than 0.896 would have been on a true re-split.
 | Fine-tuned MiniLM (best of 5 seeds) | 0.974 | 0.920 | 0.989 | 0.945 | 0.857 | 11 |
 | Fine-tuned MiniLM (mean of 5 seeds) | - | 0.914 ± 0.005 | - | - | - | - |
 | TF-IDF + LogisticRegression (balanced) | 0.972 | 0.907 | 0.994 | 0.899 | 0.824 | 6 |
-| 1D CNN + cosine LR schedule | 0.964 | 0.884 | 0.995 | 0.835 | 0.791 | 5 |
-| Embedding + mean pooling (PyTorch NN) | 0.955 | 0.866 | 0.984 | 0.862 | 0.758 | 15 |
+| NN mean pooling (best of 5 seeds) | 0.955 | 0.869 | 0.981 | 0.862 | 0.791 | 18 |
+| NN mean pooling (mean of 5 seeds) | - | 0.856 ± 0.008 | - | - | - | - |
+| 1D CNN + cosine LR schedule (best of 5 seeds) | 0.959 | 0.861 | 0.995 | 0.807 | 0.758 | 5 |
+| 1D CNN + cosine LR schedule (mean of 5 seeds) | - | 0.854 ± 0.004 | - | - | - | - |
 | Frozen MiniLM embeddings + LogisticRegression | 0.948 | 0.860 | 0.967 | 0.927 | 0.769 | 32 |
 
 ## Frozen embeddings (diagnostic, no fine-tuning)
@@ -176,34 +197,40 @@ third of the parameters.
 ## Findings
 
 1. **Fine-tuning is what finally beats the TF-IDF baseline - nothing else did.** Every
-   from-scratch model (NN, CNN) and the frozen-embedding diagnostic all lost to TF-IDF+LR
-   (0.907) once compared on the same split; full fine-tunes of MiniLM (0.914 ± 0.005) and
-   DistilBERT (0.914 ± 0.008) both got past it, consistently across every seed, not as a
-   fluke of one run.
-2. **Fine-tuned MiniLM and DistilBERT are statistically tied - a 3x bigger model bought
+   from-scratch model (NN: 0.856 ± 0.008, CNN: 0.854 ± 0.004) and the frozen-embedding
+   diagnostic (0.860) all lost to TF-IDF+LR (0.907) once fairly measured; full fine-tunes
+   of MiniLM (0.914 ± 0.005) and DistilBERT (0.914 ± 0.008) both got past it, consistently
+   across every seed, not as a fluke of one run.
+2. **The CNN's original headline number (0.884) was a lucky seed, not a real result.**
+   Across 5 fresh seeds it never got above 0.861 (mean 0.854 ± 0.004) - the single-seed
+   number was higher than the max of the new range, not just a high draw within it. Once
+   measured fairly, CNN and NN are statistically tied with each other (0.854 vs. 0.856),
+   not "CNN nearly caught the baseline" as the one-seed number suggested. See the
+   methodology note above for the full comparison.
+3. **Fine-tuned MiniLM and DistilBERT are statistically tied - a 3x bigger model bought
    nothing reliable here.** Their means (0.914 ± 0.005 vs. 0.914 ± 0.008) overlap well
    within either model's own seed noise. The best individual checkpoint of either model
    (DistilBERT's best seed: 0.925, 4 ham false positives) looks better than the other, but
    "best of 5 seeds" is a ceiling, not an expectation - see the dedicated sections above
    for why that distinction matters. Pending the latency benchmark below, MiniLM is the
    more defensible choice: same expected quality, a third of the parameters.
-3. `class_weight="balanced"` was, historically, the single biggest lever for the sklearn
+4. `class_weight="balanced"` was, historically, the single biggest lever for the sklearn
    baseline (see the markdown note inside `SMS_Spam_Classifier_Baseline.ipynb` for the
    old ablation numbers) - without it, spam recall on this data drops below 0.5.
-4. **Spam/smishing confusion is still the dominant error for every model**, and part of
+5. **Spam/smishing confusion is still the dominant error for every model**, and part of
    it is genuine label noise rather than a model failing to learn: the test set contains
    a "Bloomberg -Message center... Why wait?" message that appears twice with two
    different labels (once `smishing`, once `spam`) - both copies are in the baseline's
    current error list, which is as much a dataset problem as a model one.
-5. A known blind spot carried over from earlier analysis: real-world Indian promotional
+6. A known blind spot carried over from earlier analysis: real-world Indian promotional
    text (real estate, health checkups, finance) shares none of the lexical cues this
    dataset's UK-style spam uses, and has been missed by every model tried so far.
-6. Found a latent bug (not yet triggered, not yet fixed): `CNNModel.forward` in
+7. Found a latent bug (not yet triggered, not yet fixed): `CNNModel.forward` in
    `SMS_Spam_Classifier_CNN.ipynb` references `self.min` in its short-sequence padding
    branch, but the attribute is named `self.min_len`. It's never hit on this dataset
    (no batch's longest sequence is shorter than the largest kernel, 4), so training ran
    fine, but it would raise `AttributeError` on different data.
-7. **Frozen pretrained embeddings alone don't beat the sparse baseline, but fine-tuning
+8. **Frozen pretrained embeddings alone don't beat the sparse baseline, but fine-tuning
    the same model does** - frozen MiniLM scored 0.860, fine-tuned MiniLM scored 0.914 ±
    0.005. That ~5.4pp jump, on the identical base model, is the cleanest evidence yet that
    the gain was sitting in task adaptation, not in pretrained knowledge alone.
@@ -216,7 +243,4 @@ third of the parameters.
   far cheaper per message, and MiniLM is almost certainly cheaper than DistilBERT. "How
   much accuracy per millisecond" is the real comparison, and nothing else left in this
   project can substitute for actually measuring it.
-- **Multi-seed runs for the CNN** before drawing any conclusion about its variance - less
-  urgent now that it's clearly behind the baseline and both fine-tuned transformers, but
-  still useful to know how noisy 0.884 actually is.
 - Fix the `self.min` typo in `CNNModel.forward` before it's relied on with different data.
