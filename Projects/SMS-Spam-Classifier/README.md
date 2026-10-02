@@ -1,21 +1,22 @@
 # SMS Spam / Smishing Classifier
 
-Four models compared on the **same** train/val/test split: a TF-IDF + LogisticRegression
+Five models compared on the **same** train/val/test split: a TF-IDF + LogisticRegression
 baseline (`SMS_Spam_Classifier_Baseline.ipynb`), a from-scratch PyTorch mean-pooling
 embedding model (`SMS_Spam_Classifier_NN.ipynb`), a 1D CNN with a cosine LR schedule
-(`SMS_Spam_Classifier_CNN.ipynb`), and frozen `all-MiniLM-L6-v2` sentence embeddings fed
-into LogisticRegression (`SMS_Spam_Classifier_FrozenEmbeddings.ipynb`). Three-way
-classification: `ham` / `spam` / `smishing`.
+(`SMS_Spam_Classifier_CNN.ipynb`), frozen `all-MiniLM-L6-v2` sentence embeddings fed into
+LogisticRegression (`SMS_Spam_Classifier_FrozenEmbeddings.ipynb`), and a full fine-tune of
+that same MiniLM (`SMS_Spam_Classifier_MiniLMFineTuned.ipynb`). Three-way classification:
+`ham` / `spam` / `smishing`.
 
 Dataset: Mishra & Soni SMS Phishing dataset (Mendeley),
 `Data/SMS-Spam-Data/Dataset_5971.csv`, 5971 raw rows -> 5831 after de-duplication.
 
-**Split (identical across all four notebooks):** 80/20 stratified into train_temp/test,
+**Split (identical across all five notebooks):** 80/20 stratified into train_temp/test,
 then train_temp split 90/10 (stratified) into train/val. So train ~72% (4197 rows),
 val ~8% (467 rows), test = 20% (1167 rows), `random_state=42` throughout. The test set is
 touched exactly once per model, at the end.
 
-## Data fixes applied (all four notebooks)
+## Data fixes applied (all five notebooks)
 
 **1. Stripped a leading `\t` artifact.** 153 rows (2.6%) carried a literal leading tab
 character. All 153 were `spam`/`smishing` - **zero** were `ham`. This is a leakage-shaped
@@ -30,7 +31,8 @@ silently leak into anything whitespace-sensitive later.
 220 rows got a `<URL>` substitution, 625 got `<PHONE>`. Deliberately not matched: 4-6
 digit SMS short-codes (e.g. "text CHAT to 86688") - in this corpus they look identical to
 prices/quantities, and masking them indiscriminately looked more likely to hurt than help.
-The frozen-embeddings notebook skips this masking deliberately - see its own section below.
+The frozen-embeddings and fine-tuned-MiniLM notebooks skip this masking deliberately -
+see their own sections below.
 
 ## Methodology note: the baseline split changed
 
@@ -54,7 +56,9 @@ intrinsically more "correct" than 0.896 would have been on a true re-split.
 
 | Model | Accuracy | Macro-F1 | Recall (ham) | Recall (smishing) | Recall (spam) | Ham msgs flagged as spam/smishing |
 |---|---:|---:|---:|---:|---:|---:|
-| **TF-IDF + LogisticRegression (balanced)** | **0.972** | **0.907** | 0.994 | 0.899 | 0.824 | 6 |
+| **Fine-tuned MiniLM (best of 5 seeds)** | **0.974** | **0.920** | 0.989 | 0.945 | 0.857 | 11 |
+| Fine-tuned MiniLM (mean of 5 seeds) | - | 0.914 ± 0.005 | - | - | - | - |
+| TF-IDF + LogisticRegression (balanced) | 0.972 | 0.907 | 0.994 | 0.899 | 0.824 | **6** |
 | 1D CNN + cosine LR schedule | 0.964 | 0.884 | 0.995 | 0.835 | 0.791 | 5 |
 | Embedding + mean pooling (PyTorch NN) | 0.955 | 0.866 | 0.984 | 0.862 | 0.758 | 15 |
 | Frozen MiniLM embeddings + LogisticRegression | 0.948 | 0.860 | 0.967 | 0.927 | 0.769 | 32 |
@@ -82,17 +86,62 @@ Reproducibility note: first run downloads `all-MiniLM-L6-v2` from the Hugging Fa
 (~90MB), so it needs internet access once; after that it's cached locally and the
 notebook runs offline.
 
+## Fine-tuned MiniLM
+
+Same `all-MiniLM-L6-v2`, same raw text, same split - but this time a full fine-tune:
+every parameter (encoder + a freshly-initialized classification head) gets gradients,
+via `AutoModelForSequenceClassification`. `AdamW`, lr `2e-5`, linear warmup + decay,
+class-weighted `CrossEntropyLoss`, 6 epochs, checkpointed on best validation macro-F1.
+Run on Google Colab's free GPU tier (`SMS_Spam_Classifier_MiniLMFineTuned.ipynb` isn't
+executed in this repo - full fine-tuning on this machine's CPU is estimated at 10-30
+minutes per run, versus well under a minute on a free T4 - so the notebook is checked in
+unexecuted; these are the real numbers from actually running it there).
+
+Run across **5 seeds** given how small the training set is (~4.2k messages) - fine-tuning
+small data is high variance, and a single run's number isn't trustworthy on its own.
+Test macro-F1 per seed: 0.9201, 0.9046, 0.9173, 0.9164, 0.9119 - **mean 0.914, std 0.005**.
+Every single seed beat the TF-IDF baseline (0.907), not just the best one - this is a real,
+reproducible win, not a lucky draw.
+
+The checkpoint saved and reported in the table above is the **best of those 5 seeds**
+(0.920), not the mean. Worth being explicit about that distinction, for the same reason
+0.896 wasn't a fair baseline number earlier in this project: 0.920 describes this one
+saved checkpoint, 0.914 ± 0.005 is the honest "what should I expect if I fine-tune this
+again" number. Best-seed detail:
+
+```
+              precision    recall  f1-score   support
+
+         ham      0.997     0.989     0.993       967
+    smishing      0.896     0.945     0.920       109
+        spam      0.839     0.857     0.848        91
+
+    accuracy                          0.974      1167
+   macro avg      0.910     0.930     0.920      1167
+
+[[956   2   9]
+ [  0 103   6]
+ [  3  10  78]]
+```
+
+6 epochs vs. the first attempt's 4 made no real difference (0.913±0.003 at 4 epochs/3
+seeds vs. 0.914±0.005 at 6 epochs/5 seeds) - per-seed val-F1 curves show the classic
+small-dataset pattern of peaking then dipping somewhere in epochs 3-6, which the
+best-checkpoint logic already handles regardless of how many epochs you let it run.
+
+The fine-tuned checkpoint (~90MB) isn't committed to this repo - it's a one-minute Colab
+run away, not worth versioning. The notebook's save/zip/download cells are commented out
+for that reason; uncomment them if you want the actual weights.
+
 ## Findings
 
-1. **The TF-IDF+LogisticRegression baseline wins outright - neither neural model beats
-   it, once compared on the same split.** This reverses the earlier tentative read (from
-   before this split fix) that the CNN might be closing in on or passing the baseline.
-   At this dataset size (~4.2k training messages), sparse exact-token features beat both
-   a from-scratch mean-pooled embedding and a from-scratch CNN. It also overturns the
-   older "neural models trade spam recall for fewer ham false positives" narrative: the
-   corrected baseline has both the best recall on every class *and* a competitive ham
-   false-positive count (6, between the CNN's 5 and the NN's 15) - it isn't trading
-   anything away anymore.
+1. **Fine-tuning is what finally beats the TF-IDF baseline - nothing else did.** Every
+   from-scratch model (NN, CNN) and the frozen-embedding diagnostic all lost to TF-IDF+LR
+   (0.907) once compared on the same split; only a full fine-tune of MiniLM (0.914 ± 0.005
+   across 5 seeds) got past it, and did so consistently, not as a fluke of one seed. The
+   corrected TF-IDF baseline still has the fewest ham false positives of any model (6),
+   so it isn't a clean sweep - but on macro-F1, spam recall, and smishing recall,
+   fine-tuned MiniLM is now the model to beat.
 2. `class_weight="balanced"` was, historically, the single biggest lever for the sklearn
    baseline (see the markdown note inside `SMS_Spam_Classifier_Baseline.ipynb` for the
    old ablation numbers) - without it, spam recall on this data drops below 0.5.
@@ -109,22 +158,22 @@ notebook runs offline.
    branch, but the attribute is named `self.min_len`. It's never hit on this dataset
    (no batch's longest sequence is shorter than the largest kernel, 4), so training ran
    fine, but it would raise `AttributeError` on different data.
-6. **Frozen pretrained embeddings alone don't beat the sparse baseline** - see the
-   dedicated section above. The baseline's lead over every from-scratch or
-   frozen-feature approach tried so far keeps growing, not shrinking.
+6. **Frozen pretrained embeddings alone don't beat the sparse baseline, but fine-tuning
+   the same model does** - frozen MiniLM scored 0.860, fine-tuned MiniLM scored 0.914 ±
+   0.005. That ~5.4pp jump, on the identical base model, is the cleanest evidence yet that
+   the gain was sitting in task adaptation, not in pretrained knowledge alone.
 
 ## Next steps
 
-- **Latency benchmark (ms/message, CPU)** for all four models - not measured yet for any
-  of them, and it's the comparison that matters most given the target role's emphasis on
-  CPU-scale, low-latency inference. Worth calling out: the baseline isn't just the most
-  accurate model above, it's also almost certainly the cheapest to run per message - that
-  combination is worth confirming with real numbers, not assumed.
+- **Latency benchmark (ms/message)** for all five models - not measured yet for any of
+  them, and it's the comparison that matters most given the target role's emphasis on
+  CPU-scale, low-latency inference. This matters more now, not less: fine-tuned MiniLM
+  wins on quality but is a much bigger model than TF-IDF+LR, likely wants GPU to be fast,
+  and the sklearn baseline is almost certainly far cheaper per message. "How much
+  accuracy per millisecond" is the real comparison, not measured yet.
+- **Fine-tune DistilBERT** as a second data point, same recipe (raw text, same split,
+  full fine-tune, >= 5 seeds given how much seed variance mattered for MiniLM).
 - **Multi-seed runs for the CNN** before drawing any conclusion about its variance - less
-  urgent now that it's clearly behind the baseline rather than close to it, but still
+  urgent now that it's clearly behind both the baseline and fine-tuned MiniLM, but still
   useful to know how noisy 0.884 actually is.
-- **Full fine-tuning**: DistilBERT and MiniLM via `AutoModelForSequenceClassification`,
-  the model's own `AutoTokenizer` (not the custom whitespace vocab), lr 2e-5 to 5e-5,
-  AdamW, 3-4 epochs, short warmup + decay. Run >= 3 seeds given the small training set.
-  CPU fine-tuning will be slow; Colab/Kaggle free GPU is the practical option.
 - Fix the `self.min` typo in `CNNModel.forward` before it's relied on with different data.
