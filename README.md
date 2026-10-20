@@ -21,8 +21,10 @@ uv sync
 Each notebook is written to be run top-to-bottom with no manual steps beyond data setup
 (below): open it in VS Code or Jupyter, select the `.venv` interpreter/kernel this repo
 created, and **Run All**. Every notebook seeds its randomness (`random_state=42` on
-sklearn splits, `torch.manual_seed(42)` before any model/dataloader is built), so a fresh
-run reproduces the same numbers reported in each project's README.
+sklearn splits, a fixed `torch.manual_seed` before each model is built), so a fresh run
+reproduces the same accuracy numbers reported in each project's README. Latency numbers are
+the exception: they depend on the machine and its load, so expect the same ratios between
+models, not the same milliseconds.
 
 To run headlessly from the command line instead of an editor:
 
@@ -34,7 +36,7 @@ uv run --with jupyter jupyter nbconvert --to notebook --execute --inplace "Proje
 
 | Project | Notebook | Notes |
 |---|---|---|
-| [SMS Spam / Smishing Classifier](Projects/SMS-Spam-Classifier/README.md) | `SMS_Spam_Classifier_Baseline.ipynb` (TF-IDF + LogisticRegression), `SMS_Spam_Classifier_NN.ipynb` (mean-pooled embedding), `SMS_Spam_Classifier_CNN.ipynb`, `SMS_Spam_Classifier_FrozenEmbeddings.ipynb` (frozen MiniLM + LogisticRegression) | Data included in this repo. The frozen-embeddings notebook needs internet once to download its pretrained model. |
+| [SMS Spam / Smishing Classifier](Projects/SMS-Spam-Classifier/README.md) | `SMS_Spam_Classifier_Baseline.ipynb` (TF-IDF + LogisticRegression), `SMS_Spam_Classifier_NN.ipynb` (mean-pooled embedding), `SMS_Spam_Classifier_CNN.ipynb`, `SMS_Spam_Classifier_FrozenEmbeddings.ipynb` (frozen MiniLM + LogisticRegression), `SMS_Spam_Classifier_MiniLMFineTuned.ipynb`, `SMS_Spam_Classifier_DistilBERTFineTuned.ipynb`, `SMS_Spam_Classifier_Latency.ipynb` (CPU latency for all six) | Data included in this repo. The two fine-tuning notebooks are meant for a GPU (Colab) and are checked in unexecuted. The frozen-embeddings and latency notebooks need internet once to download pretrained models. |
 | [Fashion-MNIST](Projects/Fashion-MNIST/README.md) | `Fashion-MNIST.ipynb` | Requires a manual data download first — see that project's README. |
 
 ## Data
