@@ -14,7 +14,7 @@ uv sync
 ```
 
 `uv sync` creates `.venv` and installs the exact dependency versions from `uv.lock`
-(Python 3.12, pinned via `.python-version`) — no separate `pip install` step needed.
+(Python 3.12, pinned via `.python-version`), no separate `pip install` step needed.
 
 ## Reproducing results
 
@@ -42,9 +42,7 @@ uv run --with jupyter jupyter nbconvert --to notebook --execute --inplace "Proje
 ## Data
 
 `Data/SMS-Spam-Data/` is committed directly (small enough to version). `Data/Fashion-MNIST/`
-is gitignored — its training CSV alone is 133MB, over GitHub's 100MB per-file limit — see
+is gitignored — its training CSV alone is 133MB, over GitHub's 100MB per-file limit, see
 [Projects/Fashion-MNIST/README.md](Projects/Fashion-MNIST/README.md) for the download link
 and where to place the files.
 
-`Pytorch-Tutorial/` and `main.py` are local scratch/learning material, not part of any
-project, and are gitignored.
